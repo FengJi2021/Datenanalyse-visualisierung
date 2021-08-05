@@ -1,0 +1,286 @@
+---
+title: "Allgemeine Aufgaben Gruppe 06"
+author: "Marivn Meusel, Susannne Krenn, Ji Feng, Wu Cuiyu, Sheng Yin"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    theme: united
+    code_folding: hide
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+<style type="text/css">
+body{ /* Normal  */
+font-size: 15px;
+}
+div.quote-container blockquote p {
+font-size: 13px;
+}
+
+</style>
+
+# Aufgabe 1
+Zuerst werden die notwendigen Pakete gegebenenfalls installiert und dann geladen.
+
+```{r}
+if(!require("install.load")){
+  install.packages("install.load")
+}
+library('install.load')
+
+install_load("knitr", "stringr", "dplyr", "readr", "purrr", "plotly", "xtable", 
+             "kableExtra", "distr", "fitdistrplus")
+# fitdistrplus loads another select method that masks the dplyr select,
+# we change the default one to the dplyr version
+select <- dplyr::select
+```
+
+Wir laden die relevanten Dateien für den **Logistikverzug von Komponente K7**.
+Zum einen handelt es sich dabei um das *Produktionsdatum* aus dem Datensatz “Komponente_K7.csv” und zum anderen das *Wareneingangsdatum* aus “Logistikverzug_K7.csv”.
+
+```{r class.source = 'fold-show'}
+komponente_K7 <- read.csv2("data/Logistikverzug/Komponente_K7.csv")
+komponente_K7 <- komponente_K7 %>% 
+    mutate(Produktionsdatum =  as.Date(Produktionsdatum)) %>%
+    select(IDNummer, Produktionsdatum)
+
+logistikverzug_K7 <- read.csv("data/Logistikverzug/Logistikverzug_K7.csv")
+logistikverzug_K7 <- logistikverzug_K7 %>% 
+    mutate(Wareneingang =  as.Date(Wareneingang)) %>%
+    select(IDNummer, Wareneingang)
+```
+
+Die beiden Datensätze werden auf fehlende Daten überprüft.
+
+```{r class.source = 'fold-show', collapse=TRUE}
+anyNA(komponente_K7)
+anyNA(logistikverzug_K7)
+```
+
+Es sind alle Einträge vorhanden. 
+
+Der Logistikverzug wird erstellt, indem die Datensätze mit *inner_join* zusammengefügt werden.
+Zudem wird die Differenz zwischen Wareneingang und Produktionsdatum gebildet und in der Spalte mit dem Namen **Verzug** ablegt.
+
+```{r class.source = 'fold-show'}
+logistikverzug <- inner_join(komponente_K7,logistikverzug_K7,by = "IDNummer")
+logistikverzug <- logistikverzug %>%
+    transmute(Verzug = as.numeric(Wareneingang - Produktionsdatum))
+```
+
+Wir erhalten einen Datensatz namens *logistikverzug*.
+
+## Aufgabe 1a 
+### Wie ist der Logistikverzug verteilt? Begründen Sie Ihre Auswahl und stellen Sie Ihre Vorgehensweise kurz dar. 
+
+Zuerst erstellen wir zwei Cullen and Frey Graphen mit der Funktion *descdist()* aus dem package *fitdistrplus*. Wir erstellen einen für kontinuierliche und einen für diskrete Daten, um Kandidaten für mögliche passende Verteilungen zu erhalten.
+
+#### Kontinuierliche Verteilungen
+
+```{r results = 'hide'}
+descdist(as.numeric(logistikverzug$Verzug), discrete = FALSE) 
+```
+
+#### Diskrete Verteilungen
+
+```{r results = 'hide'}
+descdist(as.numeric(logistikverzug$Verzug), discrete = TRUE) 
+```
+
+Für die kontinuierlichen Verteilungen scheinen die Normal-, Lognormal-, Gamma- und Weibullverteilung zu passen. Für die diskreten Verteilungen scheinen alle 3 angegebenen Normal-, Poisson- und negative Binomialverteilung noch in Frage zu kommen. Im Folgenden benutzen wir *fitdist()* um die Passgenauigkeit der einzelnen Verteilungen genauer zu untersuchen. Dafür lesen wir das **Akaike Information Criterion (AIC)** und das **Bayesian Information Criterion (BIC)** aus und erstellen Plots für die besten 3 Verteilungen.
+
+```{r}
+# Continuous distributions
+fit_lnorm <- fitdist(as.numeric(logistikverzug$Verzug), "lnorm")
+fit_norm <- fitdist(as.numeric(logistikverzug$Verzug), "norm")
+fit_weibull <- fitdist(as.numeric(logistikverzug$Verzug), "weibull")
+fit_gamma <- fitdist(as.numeric(logistikverzug$Verzug), "gamma")
+# Discrete distributions
+fit_poisson <- fitdist(as.numeric(logistikverzug$Verzug), "pois")
+fit_nbinom <- fitdist(as.numeric(logistikverzug$Verzug), "nbinom")
+
+# Create a data frame with important metrics
+scores <- data.frame(names = c("Normal", "log-Normal", "Weibull", 
+                               "Gamma", "Poisson", "neg. Binomial"),
+                     # Akaike information criterion, the lower the better
+                     aic = c(fit_norm$aic, fit_lnorm$aic, fit_weibull$aic, 
+                             fit_gamma$aic, fit_poisson$aic, fit_nbinom$aic),
+                     # Bayesian information criterion, the lower the better
+                     bic = c(fit_norm$bic, fit_lnorm$bic, fit_weibull$bic, 
+                             fit_gamma$bic, fit_poisson$bic, fit_nbinom$bic))
+# Sort scores 
+scores <- scores %>%
+  arrange(aic, bic)
+# Print table and plots
+kable(scores, col.names = c("Verteilung", "AIC", "BIC"), caption = "Modellmetriken für alle in Frage kommende Verteilungen") %>%
+  column_spec (1:3,border_left = T, border_right = T) %>%
+  kable_styling("striped")
+```
+Sowohl der AIC und der BIC sind besser je kleiner die Werte sind. Aus der Tabelle lässt sich ablesen, dass die logarithmische Normalverteilung in beiden Metriken die besten Werte besitzt. Dicht darauf folgen die Gamma- und Normalverteilung.
+
+### Normalveteilung
+
+```{r}
+plot(fit_norm)
+```
+
+### Logarithmische Normalverteilung
+
+```{r}
+plot(fit_lnorm)
+```
+
+### Gammaverteilung
+
+```{r}
+plot(fit_gamma)
+```
+
+Auch die Plots zu den einzelnen Verteilungen untermauern dies. Im Q-Q Diagramm werden die Quantile der Daten und der theoretischen Verteilung gegenübergestellt. Im P-P Diagramm werden die Wahrscheinlichkeiten verglichen. Von allen 3 dargestellten Verteilungen, ist der Q-Q Plot der logarithmischen Normalverteilung am nächsten an den Daten. Die anderen Plots unterscheiden sich kaum. Daher sind die Daten wahrscheinlich logarithmisch normalverteilt. Die Gamma- und Normalverteilungen sind allerdings nicht vollkommen ausgeschlossen, da die Scores und Plots nur geringfügig schlechter sind.  
+
+
+## Aufgabe 1b 
+### Wie viel Zeit vergeht mindestens/höchstens zwischen Warenausgang und Wareneingang?
+   
+```{r}
+ min_verzug <- min(logistikverzug$Verzug)
+ max_verzug <- max(logistikverzug$Verzug)
+ paste('minimaler Verzug:', min_verzug, ', maximaler Verzug:', max_verzug)
+```
+Mindestens `r min_verzug` Tage und maximal `r max_verzug`  Tage liegen zwischen dem Warenausgang und dem Wareneingang.
+
+## Aufgabe 1c 
+### Bestimmen Sie den Mittelwert des Logistikverzugs.
+```{r}
+mean_verzug <- round(mean(logistikverzug$Verzug), digits = 2)
+```   
+Der Mittelwert des Logistikverzgs beträgt ca. `r mean_verzug` Tage.
+
+## Aufgabe 1d 
+### Stellen Sie die Verteilung in geeigneter Weise mit Plotly dar.
+
+Der logarithmisch Normalverteilung aus Aufgabenteil 1a entsprechend, stellen wir den Warenverzug dar und legen darüber hinaus eine Dichtefunktion der logarithmischen Normalverteilung in Rot darüber. 
+
+Der Mittelwert liegt bei `r mean_verzug` Tagen. Die Standardabweichung \sigma beschreibt die Breite der logarithmischen Normalverteilung und beträgt `r round(sd(logistikverzug$Verzug), digits = 2)``.
+
+```{r}
+# Calcualate mean and sd from logarithmic values
+sdlog_verzug <- sd(log(logistikverzug$Verzug))
+meanlog_verzug <- mean(log(logistikverzug$Verzug))
+# Plot
+ggplot(logistikverzug, aes(x = Verzug))+
+  geom_histogram(aes(y = ..density..),binwidth = 1, colour = "gray", 
+    fill = "skyblue", size = 0.1) +
+  geom_function(fun = dlnorm, colour = "red", 
+    args = list(meanlog = meanlog_verzug, sdlog = sdlog_verzug)) +
+  ggtitle("Datenverteilung und Log-Normalverteilung") +
+  xlab("Verzug in Tagen") +
+  ylab("Wahrscheinlichkeit") +
+  theme_classic()
+```
+
+
+# Aufgabe 2 
+### Warum ist es sinnvoll, die Ihnen bereitgestellten Daten in separaten Dateien abzulegen und nicht alles in einer riesigen Tabelle abzuspeichern? Wie nennt sich das zugrunde liegende Datenbankkonzept?
+Das Konzept nennt sich **relationale Datenbank**, was einer Aufteilung in separate Dateien entspricht.
+Wie die Tabelle, die wir durch die gemeinsame Speicherung der bereitgestellten Daten erhalten, hat auch eine große Tabelle einige Nachteile. Aufgrund der Dateigröße wird die Leistung des Datenbanksystems (z. B. bei der Datensicherung) stark eingeschränkt.  
+Bei einer einzelnen Tabelle kann der Fehler so groß sein, dass der gesamte Datensatz unbrauchbar wird. Für die Benutzer, die auf die Datenbank zugreifen wollen, hat dies eine gravierende Beeinträchtigung zur Folge, da sich aus Sicht des Benutzers die Zugriffszeit und die Bedienbarkeit verschlechtern.  
+
+Aus diesem Grund werden die bereitgestellten Daten mit dem Konzept der Datenbankpartitionierung, oder auch relationales Datenbankkonzept genannt, in getrennten Dateien gespeichert. Bei der Partitionierung werden die Datensätze in viele kleinere Datensätze aufgeteilt und durch lokale Beziehungen miteinander verknüpft. Die Größe einer einzelnen Datei wird stark reduziert, während sich gleichzeitig die Anzahl der Dateien erhöht.   
+Bei der Aufteilung des Datensatzes sollte eine disjunkte Aufteilung angestrebt werden, um Redundanzen zu reduzieren. Mit einer effektiven Ausführungsstrategie kann man den Zugriff auf die gesamte Datenmenge vermeiden und nur auf den Teil der Daten zugreifen, den die entsprechende Anfrage benötigt. Dies verbessert die Leistung des Systems und damit die Zugriffsgeschwindigkeit und die Gesamtverfügbarkeit. 
+Gleichzeitig bringt die Partitionierung aber auch eine höhere Komplexität bei der Datenbankverwaltung und der Datensicherung mit sich. Besonders wenn sich der Datenbestand ständig ändert, ist es notwendig, den Datenbestand aufzuteilen und eine Vorausschau zu halten.   
+Werden diese Besonderheiten nicht beachtet, wirkt sich die Partitionierung auch negativ auf die Performance und die Verfügbarkeit des Datensatzes aus.
+
+
+# Aufgabe 3 
+### Wie viele der Komponenten K7 landeten in Fahrzeugen, die in Talheim b. Heilbronn zugelassen wurden?
+
+Wir laden den Datensatze "Bestandteile_Fahrzeuge_OEM2_Typ22.csv", da die K7-Komponente nur in Fahrzeugen des Typs 22 eingebaut wird. Das wissen wir nach kurzer Recherche. Wir verwenden *read_csv2 ()* zum laden, da die Einträge durch Semikolon getrennt sind. Es werden die Spalten *ID_Karosserie* und *ID_Fahrzeug* in **Bestandteile_K7** gespeichert. Dann wird die Zulassungstabelle eingelesen. Im Anschluss wird *IDNummer* und *Geimeinden* als Spalten aus der eingelesenen Tabelle in **Zulassungen_K7** geschrieben.
+
+```{r class.source = 'fold-show'}
+bestandteile_fahrzeuge_oem2_typ22 <- read_csv2("Data/Fahrzeug/Bestandteile_Fahrzeuge_OEM2_Typ22.csv")
+bestandteile_k7 <- bestandteile_fahrzeuge_oem2_typ22 %>%
+  select(ID_Karosserie, ID_Fahrzeug)
+zulassungen_fahrzeuge <- read_csv2("Data/Zulassungen/Zulassungen_alle_Fahrzeuge.csv")
+zulassungen_k7 <- zulassungen_fahrzeuge %>%
+  select(IDNummer, Gemeinden)
+```
+Die ID des Fahrzeugs ist zum einen im Datensatz **Zulassungen_alle_Fahrzeuge** und zum anderen in **Bestandteile_Komponente_K7** zu finden. In der einen Tabelle heißt die Spalte *IDNummer* und in der anderen *ID_Fahrzeug*. Es handelt sich hier jedoch um den gleichen Wert.  Deshalb binden wir die beiden Spalten mit *inner_join* an dieser Spalte zusammen und nennen die Tabelle Fahrzeuge_K7, da sie alle Fahrzeuge mit der Komponete K7 enthält. Sie besitzt die Spalten *IDNummer*, *Gemeinden*, und *ID_Karosserie*.
+
+```{r class.source = 'fold-show'}
+fahrzeuge_k7 <- inner_join(zulassungen_k7, bestandteile_k7, by = c("IDNummer" = "ID_Fahrzeug"))
+
+```
+Der neue Datensatz enthält Daten von Fahrzeugen des Typs 22 mit der eingebauten Komponente K7, daher wird nun die Anzahl der in Talheim bei Heilbronn zugelassenen Fahrzeuge daraus gezählt.
+Talheim bei Heilbronn ist als TALHEIM im Datensatz hinterlegt.
+
+```{r class.source = 'fold-show'}
+k7 <- fahrzeuge_k7%>%
+ filter(Gemeinden == "TALHEIM")
+paste('Anzahl Einträge:', nrow(k7))
+```
+Es gibt `r nrow(k7)` Einträge und somit wurden `r nrow(k7)` in Fahrzeugen verbaut, die in Talheim bei Heilbronn zugelassen wurden.
+
+# Aufgabe 4 
+### Welche Datentypen haben die Attribute der Zulassungstabelle „Zulassungen_aller_Fahrzeuge“? Erstellen Sie dazu eine Tabelle in Markdown.
+```{r}
+# Prepare data
+Tabelle <- unlist(sapply(zulassungen_fahrzeuge, class))
+df <- data.frame(Tabelle)
+names <- rownames(df)
+rownames(df) <- NULL
+data <- cbind(names, df)
+# Print table
+kable(data, col.names = c("Variable", "Datentyp"), caption = "Datentypen der Tabelle Zulassungen_alle_Fahrzeuge") %>%
+  column_spec (1:2,border_left = T, border_right = T) %>%
+  kable_styling("striped")
+```
+
+# Aufgabe 5 
+### Sie wollen Ihre Applikation veröffentlichen. Warum ist es gerade dann sinnvoll die Datensätze auf der Datenbank eines Servers abzulegen? Warum können Sie die Datensätze nicht auf Ihrem persönlichen Computer ablegen? Nennen Sie eine einfache Möglichkeit Ihre Applikation ihrem Kundenkreis zugänglich zu machen?
+Grundsätzlich können wir eine Shiny App auf zwei verschiedene Arten veröffentlichen. 
+Entweder wir schicken dem jeweiligen Benutzer ein R Markdown Dokument bzw. stellen 
+es zum Download bereit, oder wir veröffentlichen unsere App als Website. Denn die 
+Veröffentlichung als R Markdown Dokument bedeutet für den Endanwender, dass er eine 
+laufende R-Sitzung auf seinem Rechner haben muss und dann das R Markdown Dokument 
+manuell ausführen muss. Außerdem benötigt der Anwender die Datensätze auf seinem
+Rechner oder zumindest den Zugriff auf diese. Diese Variante ist sehr unhandlich 
+und erfordert viel Fachwissen.
+
+Wenn wir die App veröffentlichen wollen, dann soll diese auch für Benutzer gedacht
+sein, die R nicht auf ihrem Rechner installiert haben und sich damit nicht wirklich 
+auskennen. Deshalb macht es viel mehr Sinn, unsere App auf einer Website zu veröffentlichen. 
+Dadurch läuft die Shiny App nicht auf dem PC des Benutzers. stattdessen läuft die
+zugehörige R-Sitzung auf einem Server. Dieser Server 
+benötigt auch die für ihn verwendeten Datensätze, um die App korrekt auszuführen.
+Aus diesem Grund ist es sinnvoll, auch die Datensätze auf dem Server zu speichern.
+
+Theoretisch können Sie natürlich auch einen Personal Computer als Server einrichten 
+und die R-Sitzung darüber laufen lassen und die Datensätze dann entsprechend dort 
+ablegen. Allerdings hätte dies einige Nachteile gegenüber einem "echten" Server. 
+Um die Seite ständig erreichbar zu machen, müsste der Rechner rund um die Uhr laufen 
+und permanent der Last bei hohen Zugriffsraten standhalten, um eine gute Performance 
+der Seite zu gewährleisten. Beides ist mit einem durchschnittlichen PC nicht einfach 
+zu realisieren. Ein weiteres Problem stellt der Multi-User-Betrieb dar. 
+Für die Nutzung durch mehrere Personen gleichzeitig, verwenden Server-Datenbanken 
+bestimmte Methoden im Zugriffsmanagement, um eine sichere Nutzung und Verarbeitung
+der Daten zu gewährleisten. Ein PC kann dies nur sehr viel schlechter als ein Server.
+
+
+# Aufgabe 6 
+### Am 11.08.2010 hat es einen Unfall mit Fahrerflucht gegeben. Von dem Kennzeichen des Unfallwagens fehlt jede Spur. Die Polizei bittet Sie um Hilfe, da Sie für das Kraftfahrtbundesamt arbeiten und fragt, wo das Fahrzeug mit der Karosseriebauteilnummer „K7-114-1142-31“ zugelassen wurde.
+
+Wir filtern die Tabelle Fahrzeuge_K7 nach Karosseriebauteilnummer "K7-114-1142-31".
+
+```{r class.source = 'fold-show'}
+fahrzeug_gesucht <- fahrzeuge_k7 %>%
+    filter(ID_Karosserie == "K7-114-1142-31")
+show(fahrzeug_gesucht$Gemeinden)
+```
+Es stellt sich heraus, dass das gesuchte Fahrzeug in Allendorf (Eder) zugelassen wurde.
+
+
