@@ -1,0 +1,1136 @@
+---
+title: "Case Study Gruppe 6"
+output: 
+  html_document:
+    theme: united
+    code_folding: show
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+
+<style type="text/css">
+body{ /* Normal  */
+font-size: 15px;
+}
+
+div.quote-container blockquote p {
+font-size: 13px;
+}
+
+</style>
+
+# Einleitung
+
+Wir als Ledersitzbezughersteller **213** interessieren uns dafür, in welchen 
+Gemeinden Deutschlands unsere Lederbezüge **T14** beliebt sind. Unsere Aufgabe 
+ist es, die Zulassungszahlen von Fahrzeugen, die unsere Sitzbezüge verbaut haben, 
+über die Postleitzahlen und Fahrzeugtypen zu analysieren. Weiterhin wollen wir 
+die Zulassungen neben den Postleitzahlen noch zusätzlich nach Bundesländern 
+kategorisieren. Dieses Dokument beinhaltet die Arbeitsschritte zu dieser Aufgabe.
+
+Dem allgemeinen Datenanalyseprozess folgend  
+![](https://d33wubrfki0l68.cloudfront.net/795c039ba2520455d833b4034befc8cf360a70ba/558a5/diagrams/data-science-explore.png)
+
+beginnen wir mit dem abarbeiten der vorgebenen Struktur. Zuerst jedoch sichten 
+wir die Daten und stellen ein paar Vorüberlegungen an.
+
+## Allgemeine Herangehensweise
+
+Die Case Study der Gruppe 6 benutzt als Grundlage die Tabelle Einzelteil_T14. 
+Das Bauteil T14 stellt die Tier-2 Ebene für uns als Hersteller der Ledersitzbezüge dar. 
+Im Anschluss untersuchen wir die Bestandteiletabelle_Komponente K2LE1 nach Komponenten,
+in denen das Bauteil T14 mitverbaut wird. Die Komponente K2LE1 stellt 
+die Tier1 Ebene dar. Die Komponenten werden in Fahrzeugen auf OEM Ebene verbaut. 
+In Bestandteile_Fahrzeuge_OEM1_Typ11 und Bestandteile_Fahrzeuge_OEM1_Typ12 finden 
+sich die entsprechenden Komponenten wieder.  
+
+Anschließend wird auf Zulassungebene in Zulassungen_aller_Fahrzeuge und in den 
+Geodaten_Gemeiden weiter Daten herausgefiltert. Der finale Datensatz für die 
+Applikation besteht aus Spalten der oben genannten Tabellen.  Benötigt werden 
+folgende Pakete. Sie werden installiert, falls sie das noch nicht sind 
+und dann geladen.  
+
+```{r}
+if(!require("install.load")){
+  install.packages("install.load")
+}
+library('install.load')
+
+install_load("readr", "dplyr", "stringr", "tidyr", "assertr")
+```
+
+Wir benötigen readr, dplyr, stringr, tidyr und assertr.
+
+# Importieren der Daten
+
+Wie bereits beschrieben gehen wir die unterschiedlich und aufeinanderfolgenden 
+Ebenen der Reihe nach durch. Hier folgt nun eine Liste der zu importierenden Dateien.  
+  
+* Einzelteil_T14.csv  
+* Bestandteile_Komponente_K2LE1.csv  
+* Komponente_K2LE1.txt  
+* Bestandteile_Fahrzeuge_OEM1_Typ11.csv  
+* Bestandteile_Fahrzeuge_OEM1_Typ12.csv  
+* Fahrzeuge_OEM1_Typ11.csv  
+* Fahrzeuge_OEM1_Typ12.csv  
+* Zulassungen_alle_Fahrzeuge.csv  
+* Geodaten_Gemeinde_v1.2_2017-08-22_TrR.csv  
+* PLZ_Bundeslaender.csv  
+  
+## Einzelteil
+
+Zuerst wird die Tabelle **Einzelteil_T14.csv** mit den relevanten Spalten *ID_T14*, 
+*Herstellernummer*, *Werksnummer*, *Produktionsdatum*, *Fehlerhaft*, *Fehlerhaft_Datum* 
+eingelesen.  
+Zu dem *Produktionsdatum_Origin_01011970* werden die Tage *origin* hinzuaddiert. 
+Die Spalten *Fehlerhaft* und *Fehlerhaft_Datum* behalten wir zunächst, um die Daten 
+an späterer Stelle auf Fehler zu überprüfen.
+
+```{r}
+# Function for reading and preparing the part file
+read_part_t14 <- function(file) {
+  # Read 'Einzelteil T14' from file. Only reads ID, Herstellernummer, Werksnummer, 
+  # Fehlerhaft, Produktionsdatum_origin and origin.
+  raw_data <- read_csv2(file, 
+    col_types = cols(
+      X1 = col_skip(),
+      X1_1 = col_skip(),
+      ID_T14 = col_character(),
+      Herstellernummer = col_factor(),
+      Werksnummer = col_factor(),
+      Fehlerhaft = col_logical(),
+      Fehlerhaft_Datum = col_date(format = "%Y-%m-%d"),
+      Fehlerhaft_Fahrleistung = col_skip(),
+      Produktionsdatum_Origin_01011970 = col_double(),
+      origin = col_date(format = "%d-%m-%Y")
+      )
+    )
+
+  prepared_data <- raw_data %>% 
+    # Create production date with the help of origin and 
+    # Produktionsdatum_Origin_01011970 (the offset to the origin)
+    mutate(Produktionsdatum = origin + Produktionsdatum_Origin_01011970) %>%
+    # Select only necessary columns
+    select(ID_T14, Herstellernummer, Werksnummer, Produktionsdatum, Fehlerhaft, Fehlerhaft_Datum) 
+}
+
+# Read part T14 file: "Einzelteil_T14.csv"
+part_data <- read_part_t14("data/Einzelteil/Einzelteil_T14.csv")
+head(part_data)
+```
+
+```{r}
+NÜberprüfung <- function(data){
+  result <- data %>% 
+    select.list(-Fehlerhaft_Datum)
+    filter_all(any_vars(is.na(.))) 
+  if(nrow(result)!=0){
+    print(paste0("fehlhaft-data:",result))
+  }
+  else{
+    print("Keine Fehler")
+  }
+}
+```
+
+```{r}
+NÜberprüfung(part_data)
+```
+
+```{r}
+invisible(part_data %>%
+  # Ignore Fehlerhaft_Datum as it is supposed to contain NA          
+  select(-Fehlerhaft_Datum) %>%
+  filter_all(any_vars(is.na(.))) %>%
+  verify(nrow(.) == 0))
+```
+
+## Komponente 
+
+Im nächsten Schritt werden die Bestandteile_Komponenten der Reihe nach darauf untersucht,
+ob das Teil *ID_T14* als Spalteneintrag vorhanden ist. 
+
+```{r}
+# Function for searching the headers of Bestandteile files for T14 Einzelteile. 
+# Not used in import pipeline, only for avoiding manual search of files
+get_T14_component_files <- function(path) {
+  # Get all files in directory
+  file_list <- list.files(path=path)
+  # Prepare output vector containing all relevant component files
+  components <- c()
+  
+  for (file in file_list) {
+    # Ignore files without Bestandteile in the filename, as only in 
+    # Bestandteile_* files are the used parts mentioned
+    if (!str_detect(file, "Bestandteile")) {
+        next
+    }
+    # Read only the header line
+    con <- file(file.path(path, file), "r")
+    header <- readLines(con, n=1)
+    close(con)
+    # Check if header contains the ID_T14 and if yes add it to the output vector
+    if (str_detect(header, "ID_T14")) {
+        components <- c(components, file.path(path, file))
+    }
+  }
+  return(components)
+}
+
+# Reads the needed part-component link file
+read_T14_K2LE1_link <- function(component_file) {
+  # Read component_file and only extract ID_T14 and ID_K2LE1
+  raw_data <- read_csv2(component_file, 
+    col_types = cols(
+      X1 = col_skip(),
+      ID_T11 = col_skip(),
+      ID_T14 = col_character(),
+      ID_T15 = col_skip(),
+      ID_K2LE1 = col_character()
+      )
+    )
+}
+
+# Get files containing T14
+component_files <- get_T14_component_files("data/Komponente/")
+component_files
+
+# Read part-component link file: "Bestandteile_Komponente_K2LE1.csv"
+part_component_links <- read_T14_K2LE1_link("data/Komponente/Bestandteile_Komponente_K2LE1.csv")
+head(part_component_links)
+```
+
+Dies trifft nur auf Bestandteil **K2LE1** zu. Aus dieser Tabelle werden nur die
+relevanten Spalten *ID_T14* und *K2LE1* behalten. Dementsprechend wird nur die 
+Komponente_K2LE1 eingelesen.    
+Die Datei "Komponente_K2LE1.txt" liegt in der Form vor, dass Spalteneinträge 
+mit **vertical v** und Zeileneinträge mit **II** getrennt sind. Um sie einzulesen 
+werden die Sepertationzeichen  wie folgt ersetzt.  
+
+```{r}
+preprocess_vertical_tab_and_II <- function(file) {
+  #read whole content as characters including escape sequences
+  file_content <- readChar(file, file.info(file)$size)
+  #substitute not parsable sequences with parsable ones
+  file_content <- gsub("\v", "\n", file_content)
+  file_content <- gsub("II", ";", file_content)
+  # As there is a column missing in the header row, 
+  # a further column needs to be inserted for correct parsing
+  file_content <- gsub('X1', 'X1";"X1_1', file_content)
+}
+```
+
+Die Einlesefunktion ist realtiv lang. Daher wird im Folgenden die funktionsweise stückweise erläutert. 
+Zuerst wird die Datei mittels *read_csv2()* eingelesen.
+
+```{r, eval=FALSE}
+   # Preprocess file
+  file_content <- preprocess_vertical_tab_and_II(file)
+  # Read data with columns ending with .x
+  raw_data1 <- read_csv2(file_content, 
+    col_types = cols(
+      X1 = col_skip(),
+      X1_1 = col_skip(),
+      ID_Sitze.x = col_character(),
+      Produktionsdatum.x = col_date(format = "%Y-%m-%d"),
+      Herstellernummer.x = col_integer(),
+      Werksnummer.x = col_integer(),
+      Fehlerhaft.x = col_logical(),
+      Fehlerhaft_Datum.x = col_date(format = "%Y-%m-%d"),
+      Fehlerhaft_Fahrleistung.x = col_skip(),
+      ID_Sitze.y = col_skip(),
+      Produktionsdatum.y = col_skip(),
+      Herstellernummer.y = col_skip(),
+      Werksnummer.y = col_skip(),
+      Fehlerhaft.y = col_skip(),
+      Fehlerhaft_Datum.y = col_skip(),
+      Fehlerhaft_Fahrleistung.y = col_skip()
+      )
+    )
+```
+      
+Mit .x und .y ist das ein Hinweis darauf, dass sie aus zwei Tabellen zusammengesestzt
+wurde. Entweder besitzt die .x Spalte Werte und die .y Spalte ist NA oder andersherum.
+Wir lesen die Datei zweimal ein, nehmen beim ersten mal einmal alle .x Einträge, beim
+zweiten mal alle .y Einträge, benennen sie dann um, um das spätere zusammenfügen 
+einfacher zu realisieren. Außerdem werden die Einträge, die nur NA besitzen, entfernt.
+
+```{r, eval=FALSE}
+  #only keep observations where at least one column contain a value
+  raw_data1 <- raw_data1 %>%     
+    rename(
+      ID_Sitze = ID_Sitze.x,
+      Produktionsdatum = Produktionsdatum.x,
+      Herstellernummer = Herstellernummer.x,
+      Werksnummer = Werksnummer.x,
+      Fehlerhaft = Fehlerhaft.x,
+      Fehlerhaft_Datum = Fehlerhaft_Datum.x
+    ) %>%
+    select(ID_Sitze, 
+      Produktionsdatum, 
+      Herstellernummer, 
+      Werksnummer, 
+      Fehlerhaft, 
+      Fehlerhaft_Datum
+    ) %>%
+    #only keep observations where at least one column contain a value
+    filter(!(is.na(ID_Sitze) & 
+      is.na(Produktionsdatum) & 
+      is.na(Herstellernummer) & 
+      is.na(Werksnummer))
+    ) 
+  
+```
+Anschließend fügen wir die beiden Sätze mit *rbind* zusammen.
+
+```{r, eval=FALSE}
+  # Combine both raw data sets
+  full_raw_data <- rbind(raw_data1,raw_data2)
+```
+
+Im folgenden ist die vollständige Funktion zu sehen.
+```{r, class.source='fold-hide'}
+# Read the K2LE1 file with special encoding
+read_component_K2LE1 <- function(file) {
+  # Preprocess file
+  file_content <- preprocess_vertical_tab_and_II(file)
+  # Read data with columns ending with .x
+  raw_data1 <- read_csv2(file_content, 
+    col_types = cols(
+      X1 = col_skip(),
+      X1_1 = col_skip(),
+      ID_Sitze.x = col_character(),
+      Produktionsdatum.x = col_date(format = "%Y-%m-%d"),
+      Herstellernummer.x = col_integer(),
+      Werksnummer.x = col_integer(),
+      Fehlerhaft.x = col_logical(),
+      Fehlerhaft_Datum.x = col_date(format = "%Y-%m-%d"),
+      Fehlerhaft_Fahrleistung.x = col_skip(),
+      ID_Sitze.y = col_skip(),
+      Produktionsdatum.y = col_skip(),
+      Herstellernummer.y = col_skip(),
+      Werksnummer.y = col_skip(),
+      Fehlerhaft.y = col_skip(),
+      Fehlerhaft_Datum.y = col_skip(),
+      Fehlerhaft_Fahrleistung.y = col_skip()
+      )
+    )
+
+  # Rename important columns and only select them, for preparing a bind
+  raw_data1 <- raw_data1 %>% 
+    rename(
+      ID_Sitze = ID_Sitze.x,
+      Produktionsdatum = Produktionsdatum.x,
+      Herstellernummer = Herstellernummer.x,
+      Werksnummer = Werksnummer.x,
+      Fehlerhaft = Fehlerhaft.x,
+      Fehlerhaft_Datum = Fehlerhaft_Datum.x
+    ) %>%
+    select(ID_Sitze, 
+      Produktionsdatum, 
+      Herstellernummer, 
+      Werksnummer, 
+      Fehlerhaft, 
+      Fehlerhaft_Datum
+    ) %>%
+    #only keep observations where at least one column contain a value
+    filter(!(is.na(ID_Sitze) & 
+      is.na(Produktionsdatum) & 
+      is.na(Herstellernummer) & 
+      is.na(Werksnummer))
+    ) 
+    
+  # Read data with columns ending with .y
+  raw_data2 <- read_csv2(file_content, 
+    col_types = cols(
+      X1 = col_skip(),
+      X1_1 = col_skip(),
+      ID_Sitze.x = col_skip(),
+      Produktionsdatum.x = col_skip(),
+      Herstellernummer.x = col_skip(),
+      Werksnummer.x = col_skip(),
+      Fehlerhaft.x = col_skip(),
+      Fehlerhaft_Datum.x = col_skip(),
+      Fehlerhaft_Fahrleistung.x = col_skip(),
+      ID_Sitze.y = col_character(),
+      Produktionsdatum.y = col_date(format = "%Y-%m-%d"),
+      Herstellernummer.y = col_integer(),
+      Werksnummer.y = col_integer(),
+      Fehlerhaft.y = col_logical(),
+      Fehlerhaft_Datum.y = col_date(format = "%Y-%m-%d"),
+      Fehlerhaft_Fahrleistung.y = col_skip()
+      )
+    )
+  
+  # Rename important columns and only select them, for preparing a bind
+  raw_data2 <- raw_data2 %>% 
+    rename(ID_Sitze = ID_Sitze.y,
+      Produktionsdatum = Produktionsdatum.y,
+      Herstellernummer = Herstellernummer.y,
+      Werksnummer = Werksnummer.y,
+      Fehlerhaft = Fehlerhaft.y,
+      Fehlerhaft_Datum = Fehlerhaft_Datum.y
+    ) %>%
+    select(ID_Sitze, 
+      Produktionsdatum, 
+      Herstellernummer, 
+      Werksnummer, 
+      Fehlerhaft, 
+      Fehlerhaft_Datum
+    ) %>%
+    #only keep observations where at least one column contain a value
+    filter(!(
+      is.na(ID_Sitze) & 
+      is.na(Produktionsdatum) & 
+      is.na(Herstellernummer) & 
+      is.na(Werksnummer)
+      )
+    )
+  
+  # Combine both raw data sets
+  full_raw_data <- rbind(raw_data1,raw_data2)
+}
+
+# Read component K2LE1 file: "Komponente_K2LE1.txt"
+component_data <- read_component_K2LE1("data/Komponente/Komponente_K2LE1.txt")
+head(component_data)
+```
+
+## Fahrzeug
+
+Alle Dateien in dem Ordner Fahrzeuge werden danach untersucht, ob sie "Bestandteile"
+im Namen enthalten. Diese werden eingelesen und weiterhin nur diejenigen importiert,
+in denen die gewünschte Komponente **K2LE1** auftritt.   
+
+Beim einlesen werden alle Einträge außer *ID_Sitze* und *ID_Fahrzeug* übersprungen.
+Außerdem erstellen wir noch zwei weitere Spalten *Fahrzeugtyp* und *Komponententyp*.
+Diese erhalten wir durch aufteilen am *-* der IDs.
+
+```{r}
+# import cars functions ----
+
+# Function for searching the headers of Bestandteile_Fahrezuge files 
+# for car components including the component K2LE1
+get_cars_component_data <- function(path, included_component) {
+  # Get all files in directory
+  file_list <- list.files(path=path)
+  # Prepare output variable
+  full_data <- NA
+  
+  for (file in file_list) {
+    # Ignore files without Bestandteile in the file name, 
+    # as only in Bestandteile_* files are the used components mentioned
+    if (!str_detect(file, "Bestandteile")) {
+      next
+    }
+    # Prepare path of file
+    file_path <- file.path(path, file)
+    # Read csv2 file
+    raw_data  <- read_csv2(file_path, 
+      col_types = cols(
+        X1 = col_skip(),
+        ID_Karosserie = col_skip(),
+        ID_Schaltung = col_skip(),
+        ID_Sitze = col_character(),
+        ID_Fahrzeug = col_character(),
+        ID_Motor = col_skip()
+      )
+    )  
+    # Add 2 additional columns Fahrzeugtyp and Komponententyp
+    mutated_data <- raw_data %>% 
+      mutate(
+        Fahrzeugtyp = as.factor(str_split_fixed(ID_Fahrzeug, "-", 4)[,1]), 
+        Komponententyp = as.factor(str_split_fixed(ID_Sitze, "-", 4)[,1])
+      )
+    # Only keep data if requested component (Komponententyp) is included in the data set
+    if (included_component %in% mutated_data$Komponententyp) {
+      print(paste0("imported file: ", file))
+      # If it is the first file which is kept, the assignment is handled differently
+      if (is.na(full_data)) full_data <- mutated_data
+      else full_data <- rbind(full_data, mutated_data)
+    }
+  }
+  return(full_data)
+}
+
+# Read files containing K2LE1 in ID_Sitze
+component_car_links <- get_cars_component_data("data/Fahrzeug/", "K2LE1")
+head(component_car_links)
+```
+
+Es handelt sich hier um die beiden Tabellen:  
+
+* Bestandteile_Fahrzeuge_OEM1_Typ11.csv  
+* Bestandteile_Fahrzeuge_OEM1_Typ12.csv  
+
+Da sich im letzten Schritt herausgestellt hat, dass nur Fahrzeuge in OEM1 mit der
+entsprechenden Komponente hergestellt werden, werden nur die passenden Fahrzeug-
+Tabellen importiert. Die zwei Tabellen bestehen jedoch aus unterschiedlichen Formaten. 
+Die eine ist mit Semikolons getrennt, das andere durch Kommata.
+Deshalb schreiben wir erst eine Funktion namens *is_csv()*, die das Format testet.
+Rufen sie anschließend auf und lesen die Tabellen dementsprechend mit read_csv
+oder read_csv2 ein.
+
+* Fahrzeuge_OEM1_Typ11.csv  
+* Fahrzeuge_OEM1_Typ12.csv  
+
+```{r}
+# Check if the file is a comma separated file (TRUE) or a colon separated file (FALSE)
+is_csv <- function(file_path) {
+  # Read first line
+  con <- file(file_path, "r")
+  header <- readLines(con, n=1)
+  close(con)
+  # Initialize output as FALSE : colon separated file
+  is_csv <- FALSE
+  # Check if header contains a comma
+  if (str_detect(header, ",")) {
+      #if TRUE the file is a comma separated file
+      is_csv <- TRUE
+  }
+  return(is_csv)
+}
+
+# Reads the relevant car data files
+get_cars_data <- function(path, oem) {
+  # Get all files in directory
+  file_list <- list.files(path=path)
+  # Prepare output variable
+  full_data <- NA
+  
+  for (file in file_list) {
+    # Ignore files with Bestandteile in the filename, as they don't contain car data
+    if (str_detect(file, "Bestandteile") || 
+        !str_detect(file, paste0("OEM", oem))) {
+        next
+    }
+    # Prepare file path
+    file_path <- file.path(path, file)
+  
+    # Read function depends on separator in file
+    if (is_csv(file_path)) {
+      # Read comma separated file
+      raw_data <- read_csv(file_path, 
+        col_types = cols(
+          X1 = col_skip(),
+          X1_1 = col_skip(),
+          ID_Fahrzeug = col_character(),
+          Produktionsdatum = col_date(format = "%Y-%m-%d"),
+          Herstellernummer = col_factor(),
+          Werksnummer = col_factor(),
+          Fehlerhaft = col_logical(),
+          Fehlerhaft_Datum = col_date(format = "%Y-%m-%d"),
+          Fehlerhaft_Fahrleistung = col_skip()
+        )
+      )
+    } else {
+      # Read colon separated file
+      raw_data <- read_csv2(file_path, 
+        col_types = cols(
+          X1 = col_skip(),
+          X1_1 = col_skip(),
+          ID_Fahrzeug = col_character(),
+          Produktionsdatum = col_date(format = "%Y-%m-%d"),
+          Herstellernummer = col_factor(),
+          Werksnummer = col_factor(),
+          Fehlerhaft = col_logical(),
+          Fehlerhaft_Datum = col_date(format = "%Y-%m-%d"),
+          Fehlerhaft_Fahrleistung = col_skip()
+        )
+      )
+    }
+    print(paste0("imported file: ", file))
+    # If its the first file which is kept, the assignment is handled differently
+    if (is.na(full_data)) full_data <- raw_data
+    else full_data <- rbind(full_data, raw_data)
+      
+  }
+  return(full_data)
+}
+
+# Read car data files of oem 1
+car_data <- get_cars_data("data/Fahrzeug/", 1)
+head(car_data)
+```
+
+
+## Zulassungen und Geodaten
+
+Die Tabelle *Zusalassungen_alle_Fahrzeuge.csv* wird nun mit *read_csv2()* eingelesen.
+
+```{r}
+# Function for reading and preparing the registration file
+read_registration <- function(file) {
+  raw_data <- read_csv2(file, 
+    col_types = cols(
+      X1 = col_skip(),
+      IDNummer = col_character(),
+      Gemeinden = col_factor(),
+      Zulassung = col_date(format = "%Y-%m-%d")
+    )
+  )
+}
+# Read registration file: "Zulassungen_alle_Fahrzeuge.csv"
+registration <- read_registration("data/Zulassungen/Zulassungen_alle_Fahrzeuge.csv")
+head(registration)
+```
+Aus dem Ornder Geodaten wird nur die Tabelle *Geodaten_Gemeiden.csv* benötigt. Die 
+Klimazonen und die Geodaten der Herstellwerke werden nicht eingebunden.
+
+```{r}
+# Function for reading the geo data
+read_geo_data <- function(file) {
+  raw_data <- read_csv2(file, 
+    col_types = cols(
+      X1 = col_skip(),
+      X = col_skip(),
+      Postleitzahl = col_factor(),
+      Gemeinde = col_factor(),
+      Laengengrad = col_double(),
+      Breitengrad = col_double()
+    )
+  )
+}
+# Read geo data file: "Geodaten_Gemeinden_v1.2_2017-08-22_TrR.csv"
+geo_data <- read_geo_data("data/Geodaten/Geodaten_Gemeinden_v1.2_2017-08-22_TrR.csv")
+head(geo_data)
+```
+
+## Externe Daten
+
+Wir wollen das Ergebnis nach Bundesländern filtern. In dem bereitgestellten 
+Datenpaket existiert allerdings keine Tabelle mit der Zuordnung zu den Bundesländern.
+Deshalb laden wir eine [Tabelle](https://excel-karte.de/wp-content/uploads/2016/12/Liste-der-PLZ-in-Excel-Karte-Deutschland-Postleitzahlen.xlsx) herunter und importieren diese.  
+
+```{r}
+read_bundeslaender <- function(file) {
+  # Read Bundeslaender file 
+  raw_data <- read_csv2(file,
+    col_types = cols(
+      PLZ = col_factor(),
+      Bundesland = col_factor(),
+      Kreis = col_factor(),
+      Typ = col_skip()
+    )
+  )
+}
+# Read Bundelaender file: PLZ_Bundeslaender.csv
+bundland <- read_bundeslaender("Zusaetzliche_Dateien_Gruppe_06/PLZ_Bundeslaender.csv")
+head(bundland)
+```
+
+Die hinzugefügte Tabelle beinhaltet Postleitzahlen und ihnen zugeordneten Bundesländer.
+Sie wird zuerst aus dem Excel Format in .csv exportiert und dann eingelesen.
+Aus dieser Tabelle behalten wir die Spalten über *Postleitzahlen*, *Gemeinden* und *Bundesland*.  
+
+# Datenaufbereitung
+
+Die Datenaufbereitung besteht aus mehreren Arbeitsschritten.  
+Wir prüfen auf Fehler beim Daten einlesen und korrigieren gegenfalls. Dann
+korrigieren wir die Spaltennamen, sofern das nicht schon voher geschehen ist.
+Im folgenden wird die Funktion *verify()* von *assertr* verwendet, die bei einem 
+erfolgreichen Durchlauf keinerlei Ausgaben gibt. Nur bei Fehlern wird ein Fehler 
+geworfen.
+
+## Prüfen auf Fehler einzelner Tabellen
+
+Die Tabellen werden auf Inkonsistenzen bezüglich der ID untersucht.  
+Hierfür wird eine Funktion geschrieben, die überprüft, ob die ID aus vier Teilen
+besteht, die durch ein - voneinander getrennt sind, das erste Segment der Teilenummer
+14 entspricht und das zweite Segement in dem Anfang des dritten Segments enthalten 
+ist.  
+Es wird weiterhin betrachtet, ob die Segemente zwei und drei jeweils nur aus Zahlen
+bestehen. Falls eine Inkonsistenz besteht wird sie, sofern möglich, entfernt. 
+
+```{r}
+# Validation functions-------------------
+
+# Checks if an id has a correct shape, 
+# 4 number segments separated by "-", 
+# has the given part number (given as string!) in the first segment, 
+# the 2. segment is in the beginning of the 3. segment
+is_ID_consistant <- function(id, part_number=NA){
+  # Split id into 4 segments
+  ID_parts <- str_split_fixed(id, "-", 4)
+  # Check if segments 2-3 consists of only numbers
+  is_number_segments <- apply(ID_parts[,2:4],2, FUN=str_detect, pattern="^[:digit:]+$")
+  is_number <- apply(is_number_segments, 1, all)
+  # Check if correct part id is in the first segment and replace for failed conversions the NA with FALSE
+  is_correct_part_number <- !logical(length(id))
+  if(!is.na(part_number)){
+    is_correct_part_number <- ID_parts[,1] == part_number
+  }
+  # Check if the 2. segment is in the beginning of the 3. segment
+  is_manufacturer_consistant <- ID_parts[,2] == substr(ID_parts[,3],1,nchar(ID_parts[,2]))
+  # If all is TRUE, the id has a correct shape
+  result <- is_number & is_correct_part_number & is_manufacturer_consistant
+}
+```
+
+Es wird weiterhin untersucht, ob das zweite Segement der Herstellernummer entspricht 
+und das dritte Segement der Werksnummer.
+
+```{r}
+# Checks if id is valid with respect to Herstellernummer and Werksnummer
+is_ID_valid <- function(ID, manufacturer, factory, part_number=NA){
+  is_ID_consistant <- is_ID_consistant(ID, part_number)
+  ID_parts <- str_split_fixed(ID,"-",4)
+  # Check manufacturer number
+  is_manufacturer_correct <- strtoi(ID_parts[,2]) == manufacturer
+  # Check factory number
+  is_factory_correct <- strtoi(ID_parts[,3]) == factory
+  result <- is_ID_consistant & is_factory_correct & is_manufacturer_correct
+}
+```
+
+Wir finden nur einen einzigen Fehler in der Geo_Data_Tabelle. Dieser besteht in einem fehlenden
+Gemeindenamen bei der Postleitzahl 87637. Nach einer kurzen Internetrecherche stellt 
+sich heraus, dass diese Postleitzahl Eisenberg oder Seeg zugeordnet ist. Da Eisenberg
+jedoch schon in dem Datensatz enthalten sit, füllen wir den fehlenden Eintrag durch
+die Gemeinde Seeg.
+
+```{r collapse=TRUE}
+# Correct data ----------------------------------------------------------------
+
+geo_data %>%
+  filter_all(any_vars(is.na(.)))
+
+geo_data %>%
+  filter(Postleitzahl == 87637)
+
+# There is 1 NA in Gemeinde for Postleitzahl 87637 which can belong to Eisenberg or Seeg. 
+# As Eisenberg is already in the data set, the missing value must be Seeg
+geo_data <- geo_data %>%
+  mutate(Gemeinde = ifelse(is.na(Gemeinde), "SEEG", as.character(Gemeinde))) %>%
+  mutate(Gemeinde = as.factor(Gemeinde))
+  
+geo_data %>%
+  filter_all(any_vars(is.na(.)))
+
+geo_data %>%
+  filter(Postleitzahl == 87637)
+```
+
+Damit sind keine fehlenden Einträge mehr in diesem Datensatz vorhanden und im
+Folgenden durch diverse Überprüfungen bestätigt.  
+
+### NA Überprüfung
+Es wird nachvollzogen, ob es fehledene Einträge gibt, an Stellen, wo es ein Problem 
+wäre, weil wir dann den Datensatz nicht validieren könnten.
+
+```{r}
+# Verify that data doesn't contain NAs where they aren't supposed to be
+invisible(part_data %>%
+  # Ignore Fehlerhaft_Datum as it is supposed to contain NA          
+  select(-Fehlerhaft_Datum) %>%
+  filter_all(any_vars(is.na(.))) %>%
+  verify(nrow(.) == 0))
+
+invisible(component_data %>%
+  # Ignore Fehlerhaft_Datum as it is supposed to contain NA          
+  select(-Fehlerhaft_Datum) %>%
+  filter_all(any_vars(is.na(.))) %>%
+  verify(nrow(.) == 0))
+
+invisible(car_data %>%
+  # Ignore Fehlerhaft_Datum as it is supposed to contain NA          
+  select(-Fehlerhaft_Datum) %>%
+  filter_all(any_vars(is.na(.))) %>%
+  verify(nrow(.) == 0))
+
+invisible(part_component_links %>%
+  filter_all(any_vars(is.na(.))) %>%
+  verify(nrow(.) == 0))
+
+invisible(component_car_links %>%
+  filter_all(any_vars(is.na(.))) %>%
+  verify(nrow(.) == 0))
+
+invisible(registration %>%
+  filter_all(any_vars(is.na(.))) %>%
+  verify(nrow(.) == 0))
+
+invisible(geo_data %>%
+  filter_all(any_vars(is.na(.))) %>%
+  verify(nrow(.) == 0))
+
+invisible(bundland %>%
+  filter_all(any_vars(is.na(.))) %>%
+  verify(nrow(.) == 0))
+```
+
+### ID Konsistenz
+Auch die ID der Bestandteile_Komponente Tabellen und der Bestandteile_Fahrzeuge
+werden untersucht. Es ist zu beachten, dass *verify()* nur dann etwas ausgibt, 
+wenn eine Inkonsistenz auftritt. Zuerst wird Struktur der ID untersucht.
+Genauer werden die Teile-IDs darauf untersucht, ob die Herstellernummer das zweite 
+Segment nach der Teilung der ID darstellt, das dritte Segment durch die Werksnummer 
+dargestellt wird und das erste Segement der Teilenummer *14* entspricht.  
+Bei den Komponenten-IDs wird geschaut, ob die sie an erster Stelle *K2LE1* enthält,
+an zweiter Stelle die Herstellernummer des Werks der Komponente und im
+dritten Segment die Werksnummer des Komponentenwerks repräsentiert.  
+Die Fahrzeug-IDs sollen nach dem gleichen Schema an richtiger Stelle die dementsprechende
+Herstellernummer und Werksnummer auf Fahrzeugsebene darstellen.
+
+```{r}
+# Assertion tests on corrected full data --------------------------------------------------------------------------------
+
+# Verify that all link tables contain consistant IDs
+invisible(part_component_links %>% 
+  filter(!is_ID_consistant(ID_T14, "14")) %>%
+  verify(nrow(.) == 0))  
+
+invisible(part_component_links %>% 
+  filter(!is_ID_consistant(ID_K2LE1, "K2LE1")) %>%
+  verify(nrow(.) == 0))  
+
+invisible(component_car_links %>% 
+  filter(!is_ID_consistant(ID_Sitze)) %>%
+  verify(nrow(.) == 0))  
+
+invisible(component_car_links %>% 
+  filter(!is_ID_consistant(ID_Fahrzeug)) %>%
+  verify(nrow(.) == 0))  
+
+```
+
+
+Als nächstes wird überprüft, ob die IDs valide sind indem die Werte aus den 
+Spalten Herstellernummer und Werksnummer auch entsprechend in der ID auftauchen.
+
+
+```{r}
+# Verify that all IDs are valid according to Werksnummer, Herstellernummer etc. 
+invisible(part_data %>%
+  filter(!is_ID_valid(ID_T14, Herstellernummer, Werksnummer, "14")) %>%
+  verify(nrow(.) == 0))
+
+invisible(component_data %>%
+  filter(!is_ID_valid(ID_Sitze, Herstellernummer, Werksnummer, "K2LE1")) %>%
+  verify(nrow(.) == 0))  
+
+invisible(car_data %>%
+  filter(!is_ID_valid(ID_Fahrzeug, Herstellernummer, Werksnummer)) %>%
+  verify(nrow(.) == 0))
+```
+
+### Einzigartigkeit
+Wir checken, ob die IDs einzigartig sind, in dem wir die Länge der Tabelle untersuchen.
+Wäre eine ID doppelt, wäre die Länge der Tabelle ungleich der Anzahl der IDs. 
+
+```{r}
+#check unique items
+invisible(part_data %>%
+  verify(nrow(.) == length(unique(ID_T14))))
+
+invisible(component_data %>%
+  verify(nrow(.) == length(unique(ID_Sitze))))
+
+invisible(car_data %>%
+  verify(nrow(.) == length(unique(ID_Fahrzeug))))
+
+invisible(part_component_links %>%
+  verify(nrow(.) == length(unique(ID_T14, ID_K2LE1))))
+
+invisible(component_car_links %>%
+  verify(nrow(.) == length(unique(ID_Sitze, ID_Fahrzeug))))
+
+invisible(registration %>%
+  verify(nrow(.) == length(unique(IDNummer))))
+
+invisible(geo_data %>%
+  verify(nrow(.) == length(unique(Gemeinde))))
+
+invisible(bundland %>%
+  verify(nrow(.) == length(unique(PLZ))))
+```
+
+### Datenabhängigkeiten
+Wenn die Spalte *Fehlerhaft* mit wahr ausgefüllt ist, dann besitzt der Eintrag ein *Fehlerhaft_Datum*.
+Falls die betrachtete Zeile fehlerfrei hergestellt wurde, bestizt sie kein
+fehlerhaftes Datum. Dies wird auf Teilebene, auf Komponentenebene und auf Fahrzeugebene
+überprüft.
+Im ersten Schritt wird geschaut, ob es Einträge auf den verschiedenen Ebenen gibt,
+die dem nicht entsprechen.
+
+```{r}
+# Test if observation is faulty, then a fault date should be set
+invisible(part_data %>%
+  filter(Fehlerhaft == TRUE) %>%
+  select(Fehlerhaft_Datum) %>%
+  filter_all(any_vars(is.na(.))) %>%
+  verify(nrow(.) == 0))
+
+invisible(component_data %>%
+  filter(Fehlerhaft == TRUE) %>%
+  select(Fehlerhaft_Datum) %>%
+  filter_all(any_vars(is.na(.))) %>%
+  verify(nrow(.) == 0))
+
+invisible(car_data %>%
+  filter(Fehlerhaft == TRUE) %>%
+  select(Fehlerhaft_Datum) %>%
+  filter_all(any_vars(is.na(.))) %>%
+  verify(nrow(.) == 0))
+```
+
+Dann schauen wir, ob es Einträge gibt, die ein *Fehlerhaft_Datum* besitzen, obwohl
+sie nicht fehlerhaft sind.
+
+```{r}
+# Test if observation has fault date but faulty is FALSE
+invisible(part_data %>%
+  filter(Fehlerhaft == FALSE) %>%
+  select(Fehlerhaft_Datum) %>%
+  filter_all(any_vars(!is.na(.))) %>%
+  verify(nrow(.) == 0))
+
+invisible(component_data %>%
+  filter(Fehlerhaft == FALSE) %>%
+  select(Fehlerhaft_Datum) %>%
+  filter_all(any_vars(!is.na(.))) %>%
+  verify(nrow(.) == 0))
+
+invisible(car_data %>%
+  filter(Fehlerhaft == FALSE) %>%
+  select(Fehlerhaft_Datum) %>%
+  filter_all(any_vars(!is.na(.))) %>%
+  verify(nrow(.) == 0))
+```
+
+Auch das ist nicht der Fall.  
+
+### Konsistenz des Datums
+Nun wird noch untersucht, ob das Produktonsdatum, in dem Fall, dass es ein *Fehlerhaft_Datum* gibt,
+vor diesem liegt. Alles andere würde auf einen logischen Fehler hinweisen.
+
+```{r}
+# Test Produktionsdatum < Fehlerdatum 
+invisible(part_data %>%
+  filter(Fehlerhaft == TRUE & !is.na(Fehlerhaft_Datum)) %>%
+  verify(Produktionsdatum <= Fehlerhaft_Datum))
+
+invisible(component_data %>%
+  filter(Fehlerhaft == TRUE & !is.na(Fehlerhaft_Datum)) %>%
+  verify(Produktionsdatum <= Fehlerhaft_Datum))
+
+invisible(car_data %>%
+  filter(Fehlerhaft == TRUE & !is.na(Fehlerhaft_Datum)) %>%
+  verify(Produktionsdatum <= Fehlerhaft_Datum))
+```
+
+### Erwartete Werte
+Als letztes wollen wir sicherstellen, dass die Bundesland-Tabelle auch 16 verschiedene
+Bundesländer besitzt. Nicht mehr und nicht weniger.
+
+```{r}
+# Check amount of bundeslaender
+invisible(bundland %>%
+  verify(nlevels(Bundesland) == 16))
+```
+
+## Joinen der Tabellen
+Im nächsten Schritt werden die relevanten Daten nach den Prinzipien von tidy data 
+aufbereitet. 
+Zunächst wird nach Herstellernummer *213* gefiltert. Dann werden alle Tabellen jeweils
+mittles *inner_join()* verknüpft, über ihre gemeinsamen Spalten.
+
+```{r}
+#we only need data from Hersteller 213
+part_data <- part_data %>%
+  filter(Herstellernummer == 213)
+
+# Join pipe
+full_tidy_data <- part_data %>%
+  inner_join(part_component_links, by = "ID_T14") %>%
+  inner_join(component_data, by = c("ID_K2LE1"="ID_Sitze"), suffix = c("_part", "_component")) %>%
+  inner_join(component_car_links, by = c("ID_K2LE1"="ID_Sitze")) %>%
+  inner_join(car_data, by = "ID_Fahrzeug") %>%
+  inner_join(registration, by = c("ID_Fahrzeug" = "IDNummer")) %>%
+  inner_join(geo_data, by = c("Gemeinden" = "Gemeinde")) %>%
+  inner_join(bundland, by = c("Postleitzahl" = "PLZ")) 
+
+head(full_tidy_data)
+```
+
+### Auf Fehler Prüfen vollständige Tabelle
+
+Nun wird für jedes Fahrzeug überprüft ob das Fehlerhaftdatum der Einzelteile, 
+Komponenten oder der Fahrzeuge selbst später sind als das Zulassungsdatum. Dabei 
+wird jede Kombination der Existenz von Fehlerhaftdaten berücksichtigt.
+
+```{r}
+# Check if fault dates are later than the registration dates
+invisible(full_tidy_data %>%
+  filter(
+    Fehlerhaft_part == TRUE & !is.na(Fehlerhaft_Datum_part) | 
+    Fehlerhaft_component == TRUE & !is.na(Fehlerhaft_Datum_component) | 
+    Fehlerhaft == TRUE & !is.na(Fehlerhaft_Datum) 
+  ) %>%
+  select(Fehlerhaft_Datum_part, Fehlerhaft_Datum_component, Fehlerhaft_Datum, Zulassung) %>%
+  verify(
+    #check for every combination of existing and non existing fault dates if all existing ones are later than 
+    # the registration date
+    ((!is.na(Fehlerhaft_Datum_part) &  is.na(Fehlerhaft_Datum_component) &  is.na(Fehlerhaft_Datum)) & 
+       (Fehlerhaft_Datum_part >= Zulassung)) | 
+    ((!is.na(Fehlerhaft_Datum_part) &  is.na(Fehlerhaft_Datum_component) & !is.na(Fehlerhaft_Datum)) & 
+       (Fehlerhaft_Datum_part >= Zulassung & Fehlerhaft_Datum >= Zulassung)) | 
+    ((!is.na(Fehlerhaft_Datum_part) & !is.na(Fehlerhaft_Datum_component) &  is.na(Fehlerhaft_Datum)) & 
+       (Fehlerhaft_Datum_part >= Zulassung & Fehlerhaft_Datum_component >= Zulassung)) | 
+    ((!is.na(Fehlerhaft_Datum_part) & !is.na(Fehlerhaft_Datum_component) & !is.na(Fehlerhaft_Datum)) & 
+       (Fehlerhaft_Datum_part >= Zulassung & Fehlerhaft_Datum_component >= Zulassung & 
+          Fehlerhaft_Datum >= Zulassung)) | 
+    (( is.na(Fehlerhaft_Datum_part) &  is.na(Fehlerhaft_Datum_component) & !is.na(Fehlerhaft_Datum)) & 
+       (Fehlerhaft_Datum >= Zulassung)) |
+    (( is.na(Fehlerhaft_Datum_part) & !is.na(Fehlerhaft_Datum_component) &  is.na(Fehlerhaft_Datum)) & 
+       (Fehlerhaft_Datum_component >= Zulassung)) | 
+    (( is.na(Fehlerhaft_Datum_part) & !is.na(Fehlerhaft_Datum_component) & !is.na(Fehlerhaft_Datum)) & 
+       (Fehlerhaft_Datum_component >= Zulassung & Fehlerhaft_Datum >= Zulassung)) 
+  )
+)
+```
+
+## Spaltennamen korrigieren
+
+Eine kleine Korrektur der Spaltenamen der Zulassungsdatum und Gemeinde erfolgt mit
+anschließender Auswahl der final relevanten Observationen. Bis hier haben wir die
+Spalten *Fehlerhaft_Datum* und *Fehlerhaft* für die Validierung beibehalten. Jetzt 
+entfernen wir diese und behalten nur ID_Fahrzeug, Fahrzeugtyp, Zulassungsdatum, 
+Gemeinde, Bundesland, Laengengrad und Breitengrad.
+
+```{r}
+selected_tidy_data <- full_tidy_data %>%
+  rename(Zulassungsdatum = Zulassung, Gemeinde = Gemeinden) %>%
+  select(ID_Fahrzeug, Fahrzeugtyp, Zulassungsdatum, Gemeinde, Bundesland, Laengengrad, Breitengrad)
+
+head(selected_tidy_data)
+```
+
+# Erstellen des finalen Datensatzes
+
+Nachdem im letzten Abschnitt bereits die Daten vollständig aufbereitet wurden, 
+wird im Folgenden der finale Datensatz erstellt und in der Datei 
+"Finaler_Datensatz_Gruppe_06.RData" abgespeichert.  
+
+```{r}
+
+#save final data set
+save(selected_tidy_data, file = "Finaler_Datensatz_Gruppe_06.RData")
+```
+
+# Auswertung
+
+Mittels einer shiny App, nehmen wir die Endbetrachtung des Datensatzes vor. 
+
+## Aufbau der App
+
+Das Design der App ist so aufgebaut, dass sich ein Fenster mit den Reitern
+*Zulassung*, *Heatmap*, *Tabelle*, *Gruppeninformation*
+auf der linken Seite befindet. Diese lässt sich ein- und ausklappen, indem man auf 
+die drei weißen, horizontalen Striche im Headerbereich klickt. 
+
+Das TU-Logo befindet sich oben rechts in der Ecke und ist damit immer sichtbar.
+Im Hauptfenster werden die Grafiken und Einstellungsmöglichkeiten dargestellt.
+
+## Funktionalität
+
+Im ersten Reiter *Zulassung* befindet sich ein Balkendiagramm.
+Hier kann ein Zeitraum ausgewählt werden zwischen 2009 bis 2016, wobei sich Start-
+als auch Endzeitpunkt auswählen lassen.
+
+Es ist ein Balkendiagramm, das die monatlichen Zulassungszahlen von Fahrzeugen mit 
+unseren Ledersitzbezügen T14, gestapelt über die Fahrzeugtypen 11 und 12, über 
+einen beliebig einstellbaren Zeitraum darstellt.
+
+![Balkendiagramm Zeitraum 7 Jahre](Zusaetzliche_Dateien_Gruppe_06\imgs\bar_chart.png)
+
+![Balkendiagramm Zeitraum 1 Jahr](Zusaetzliche_Dateien_Gruppe_06\imgs\Zeitraum_Balkendiagramm3.PNG)  
+
+
+Im nächsten Reiter namens *Heatmap* lassen sich zum einen der Fahrzeugtyp *Typ 11*,
+*Typ 12* oder *beide* auswählen und zum Anderen, die Verteilung nach Gemeinde oder
+Bundesland.
+ 
+![Heatmap Typ 11](Zusaetzliche_Dateien_Gruppe_06\imgs\heatmap_type11.png)  
+
+![Heatmap Typ 12](Zusaetzliche_Dateien_Gruppe_06\imgs\heatmap_type12.png)   
+
+Es lässt sich in die Karte herein- und herauszoomen und die Darstellung passt sich an die
+Auswahl des Ausschnitts an. Es werden zudem Marker als blaue Punkte für jede Gemeinde bzw. Bundesland
+platziert, die den Namen des Ortes und die Anzahl der Zulassungen behinhalten.
+Die Zahlen die direkt auf der Karte sichtbar sind, sind die Anzahl dieser Marker in einem Cluster.
+Bei einem Klick auf einen Cluster wird an diesen herangezoomt. Dies soll verhindern, 
+dass nur Markerangezeigt werden.
+
+![Heatmap beider Fahrzeugtypen](Zusaetzliche_Dateien_Gruppe_06\imgs\heatmap_beide_Gemeinden.PNG)
+
+Hinter dem Reiter *Tabelle* befindet sich unser finaler Datensatz.
+Diese Tabelle beinhaltet insgesamt 190820 Einträge. Eine Suchfunktion am oberen 
+rechten Rand der Tabelle wird ebenfalls untertstützt.
+
+![Tabelle](Zusaetzliche_Dateien_Gruppe_06\imgs\table.png)
+Sie ist nicht assoziativ verknüpft und stellt immer die selben Einträge an. Allerdings
+kann man hier die Anzeigeoption wählen, wieviele Einträge man gleichzeitig angezeigt 
+haben will.
+
+Als letztes gibt es den Reiter *Gruppeninformation*, in dem die Namen der Gruppenmitglieder
+der Gruppe 6 aufgeführt werden.
+
+![Gruppeninformation](Zusaetzliche_Dateien_Gruppe_06\imgs\group_info.png)
+
+
+
+# Ergebnis
+
+Der zugrundeliegenden Datensatz spiegelt die Grundlage unserer Visualisierungen.  
+Diese werden dem Marketing übergeben, um gezielt Werbung in ganz Deutschland schalten 
+zu können. Durch eine App wird das Ergebnis grafisch dem Kunden zugänglich gemacht.
+Um die gestellte Frage der Case-Study direkt zu beantworten schauen wir uns die Heatmap auf Bundeslandebene an.
+Am beliebtesten waren die Ledersitzbezüge in dem betrachteten ganzen Zeitabschnitt auf 
+Bundeslandebene in Bayern mit 37341 gefolgt von Nordrhein-Westfalen mit 33418
+Zulassungen. Auch in Sachsen(20690) und Baden-Würtemberg(21029) sind die Bezüge 
+noch vergleichsweise beliebt. Auf der Anderen Seite sind in Berlin und Bremen gar 
+keine Zulassungen registriert.
+![Heatmap nach Auswahl Bundsländer](Zusaetzliche_Dateien_Gruppe_06\imgs\heatmap_bund.png)
+
+Weitere interessante Erkenntnisse aus dem Balkendiagramm sind zum einem, dass deutlich mehr Fahrzeuge des Typs 11 unsere Lederbezüge besitzen.
+Zum Anderen sind die Zulassungszahlen relativ stabil im gesamten Zeitraum. 
+Es gibt nur wenige Ausreißer, wie Januar 2010 und Februar 2011 im negativen 
+Sinne oder August 2011 im positiven Sinne.
+![Balkendiagramm Zeitraum 7 Jahre](Zusaetzliche_Dateien_Gruppe_06\imgs\bar_chart.png)
+
+Außerdem ist es auffällig, dass sich die Verteilung zwischen Fahrzeugtypen auf den Gemeinden/Bundesländer kaum unterscheiden.
+
+Das Ergebnis ist nur begrenzt aussagekräftig. Es bleiben noch einige Punkte zu kritisieren
+bzw. die Aussagekraft einzuschränken.  
+
+Es handelt sich hierbei nur um neu zugelassene Kraftfahrzeuge. Es ist also unklar, 
+in wie weit sich die Beliebtheit des Produkts in Weiterverkäufen niederschlägt.
+Auch über die Beliebtheit im Ausland können wir keine Aussagen treffen. Da Deutschland sehr
+viele Autos exportiert, sollte das einen nicht unwichtigen Teil des Wirtschaftserfolges 
+ausmachen.   
+Darüber hinaus beinhaltet unser Datensatz nur Daten von Zulassungen von Anfang 2009 
+bis Ende 2016.  
+
+Wie sich das Geschäft in den letzten 5 Jahren entwickelt hat, kann mit der Datenbasis 
+leider keine Aussage getroffen werden. Diese Daten sollten in die Betrachtung 
+miteinbezogen werden, wenn realistische Trends für die Zukunft erstellt werden sollen.  
+
+ 
+
+
+
+
+
+
+
+
+
+
+
